@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { api, authed } from '../helpers/client'
-import { registerAndLogin, decodeUserId } from '../helpers/auth'
+import { adminLogin, registerAndLogin, decodeUserId } from '../helpers/auth'
 
 let token: string
 let userId: string
@@ -9,6 +9,12 @@ beforeAll(async () => {
   const { token: t } = await registerAndLogin()
   token = t
   userId = decodeUserId(token)
+})
+
+afterAll(async () => {
+  const adminToken = await adminLogin()
+  if (!adminToken || !userId) return
+  await authed(adminToken).delete(`/users/${userId}`)
 })
 
 describe('Files', () => {
@@ -28,8 +34,8 @@ describe('Files', () => {
         entityType: 'user',
         contentType: 'image/jpeg',
       })
-      // S3 may or may not be configured; accept 201 (S3 up) or 500/400 (S3 not configured)
-      // The important thing is it's NOT 401
+      // S3 may not be configured in dev — accept 201 (S3 up) or 500 (S3 not configured)
+      // The critical assertion is: NOT 401
       expect(res.status).not.toBe(401)
       if (res.status === 201) {
         expect(res.data).toHaveProperty('fileId')

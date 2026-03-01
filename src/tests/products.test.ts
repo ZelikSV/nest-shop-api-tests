@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, afterAll } from 'vitest'
 import { api } from '../helpers/client'
 
-let createdProductId: string
+const productIdsToCleanup: string[] = []
+
+afterAll(async () => {
+  await Promise.all(productIdsToCleanup.map((id) => api.delete(`/products/${id}`)))
+})
 
 describe('Products (no auth required)', () => {
   describe('POST /products', () => {
@@ -15,7 +19,7 @@ describe('Products (no auth required)', () => {
       expect(res.status).toBe(201)
       expect(res.data).toHaveProperty('id')
       expect(res.data.name).toBe('Test Product')
-      createdProductId = res.data.id as string
+      productIdsToCleanup.push(res.data.id as string)
     })
   })
 
@@ -35,9 +39,18 @@ describe('Products (no auth required)', () => {
 
   describe('GET /products/:id', () => {
     it('returns 200 with the product for a known id', async () => {
-      const res = await api.get(`/products/${createdProductId}`)
+      const createRes = await api.post('/products', {
+        name: 'Get By Id Product',
+        price: 5.0,
+        stock: 1,
+      })
+      expect(createRes.status).toBe(201)
+      const id = createRes.data.id as string
+      productIdsToCleanup.push(id)
+
+      const res = await api.get(`/products/${id}`)
       expect(res.status).toBe(200)
-      expect(res.data.id).toBe(createdProductId)
+      expect(res.data.id).toBe(id)
     })
 
     it('returns 404 for unknown uuid', async () => {
@@ -48,7 +61,16 @@ describe('Products (no auth required)', () => {
 
   describe('PUT /products/:id', () => {
     it('returns 200 with updated product', async () => {
-      const res = await api.put(`/products/${createdProductId}`, {
+      const createRes = await api.post('/products', {
+        name: 'To Update',
+        price: 10.0,
+        stock: 5,
+      })
+      expect(createRes.status).toBe(201)
+      const id = createRes.data.id as string
+      productIdsToCleanup.push(id)
+
+      const res = await api.put(`/products/${id}`, {
         name: 'Updated Product',
         price: 19.99,
       })
@@ -77,6 +99,7 @@ describe('Products (no auth required)', () => {
         price: 1.0,
         stock: 0,
       })
+      expect(createRes.status).toBe(201)
       const id = createRes.data.id as string
       await api.delete(`/products/${id}`)
 

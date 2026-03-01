@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { api, authed } from '../helpers/client'
-import { adminLogin, registerAndLogin, uniqueEmail } from '../helpers/auth'
+import { adminLogin, registerAndLogin, uniqueEmail, decodeUserId } from '../helpers/auth'
 
 let adminToken: string
-let customerToken: string
+let customerUserId: string
 let createdUserId: string
 
 beforeAll(async () => {
@@ -12,7 +12,13 @@ beforeAll(async () => {
   adminToken = token
 
   const { token: ct } = await registerAndLogin()
-  customerToken = ct
+  customerUserId = decodeUserId(ct)
+})
+
+afterAll(async () => {
+  const client = authed(adminToken)
+  const ids = [createdUserId, customerUserId].filter(Boolean)
+  await Promise.all(ids.map((id) => client.delete(`/users/${id}`)))
 })
 
 describe('Users (admin only)', () => {
@@ -23,7 +29,10 @@ describe('Users (admin only)', () => {
     })
 
     it('returns 403 with customer token', async () => {
-      const res = await authed(customerToken).get('/users')
+      const { token: ct } = await registerAndLogin()
+      const res = await authed(ct).get('/users')
+      // clean up inline — no admin needed, we use the user's own id via decodeUserId
+      await authed(adminToken).delete(`/users/${decodeUserId(ct)}`)
       expect(res.status).toBe(403)
     })
 
@@ -87,12 +96,11 @@ describe('Users (admin only)', () => {
 
   describe('DELETE /users/:id', () => {
     it('returns 204 when deleting (admin)', async () => {
-      const email = uniqueEmail()
       const createRes = await authed(adminToken).post('/users/new', {
         firstName: 'Delete',
         lastName: 'Me',
         age: 25,
-        email,
+        email: uniqueEmail(),
       })
       expect(createRes.status).toBe(201)
       const id = createRes.data.id as string
@@ -102,13 +110,13 @@ describe('Users (admin only)', () => {
     })
 
     it('returns 404 after deletion', async () => {
-      const email = uniqueEmail()
       const createRes = await authed(adminToken).post('/users/new', {
         firstName: 'Delete',
         lastName: 'Me2',
         age: 25,
-        email,
+        email: uniqueEmail(),
       })
+      expect(createRes.status).toBe(201)
       const id = createRes.data.id as string
       await authed(adminToken).delete(`/users/${id}`)
 

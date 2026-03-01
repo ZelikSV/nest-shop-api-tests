@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import axios from 'axios'
 import { gqlEndpoint, api } from '../helpers/client'
-import { registerAndLogin, decodeUserId } from '../helpers/auth'
+import { adminLogin, registerAndLogin, decodeUserId } from '../helpers/auth'
+import { authed } from '../helpers/client'
 
 const gql = axios.create({ baseURL: gqlEndpoint, validateStatus: () => true })
 
@@ -12,11 +13,13 @@ async function query(body: object) {
 let userId: string
 let productId: string
 
+// Extra users created inside individual tests
+const extraUserIds: string[] = []
+
 beforeAll(async () => {
   const { token } = await registerAndLogin()
   userId = decodeUserId(token)
 
-  // Create product and order so there's data to query
   const productRes = await api.post('/products', {
     name: 'GraphQL Test Product',
     price: 15.0,
@@ -31,6 +34,21 @@ beforeAll(async () => {
     items: [{ productId, quantity: 1 }],
   })
   expect(orderRes.status).toBe(201)
+})
+
+afterAll(async () => {
+  const adminToken = await adminLogin()
+  if (!adminToken) return
+  const client = authed(adminToken)
+
+  // Delete extra users (no orders, safe to delete directly)
+  await Promise.all(extraUserIds.map((id) => client.delete(`/users/${id}`)))
+
+  // Delete main user — cascades the order created in beforeAll
+  if (userId) await client.delete(`/users/${userId}`)
+
+  // Delete product after user/orders are gone
+  if (productId) await api.delete(`/products/${productId}`)
 })
 
 describe('GraphQL', () => {
@@ -117,6 +135,7 @@ describe('GraphQL', () => {
     it('returns empty array for user with no orders', async () => {
       const { token } = await registerAndLogin()
       const newUserId = decodeUserId(token)
+      extraUserIds.push(newUserId)
 
       const res = await query({
         query: `

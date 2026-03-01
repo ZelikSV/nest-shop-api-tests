@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { api, authed } from '../helpers/client'
-import { registerAndLogin, decodeUserId } from '../helpers/auth'
+import { adminLogin, registerAndLogin, decodeUserId } from '../helpers/auth'
 import { waitFor } from '../helpers/poll'
 
 let token: string
@@ -8,12 +8,14 @@ let userId: string
 let productId: string
 let zeroStockProductId: string
 
+// Extra user IDs created inside individual tests
+const extraUserIds: string[] = []
+
 beforeAll(async () => {
   const { token: t } = await registerAndLogin()
   token = t
   userId = decodeUserId(token)
 
-  // Create a product with stock for ordering
   const productRes = await api.post('/products', {
     name: 'Order Test Product',
     description: 'Used in order tests',
@@ -23,7 +25,6 @@ beforeAll(async () => {
   expect(productRes.status).toBe(201)
   productId = productRes.data.id as string
 
-  // Create a product with zero stock for conflict test
   const zeroRes = await api.post('/products', {
     name: 'Out of Stock Product',
     price: 5.0,
@@ -31,6 +32,23 @@ beforeAll(async () => {
   })
   expect(zeroRes.status).toBe(201)
   zeroStockProductId = zeroRes.data.id as string
+})
+
+afterAll(async () => {
+  const adminToken = await adminLogin()
+  if (!adminToken) return
+  const client = authed(adminToken)
+
+  // Delete extra users created inside tests (cascades their orders)
+  await Promise.all(extraUserIds.map((id) => client.delete(`/users/${id}`)))
+
+  // Delete main user — cascades all their orders
+  if (userId) await client.delete(`/users/${userId}`)
+
+  // Delete products after users (order items are gone by now)
+  await Promise.all(
+    [productId, zeroStockProductId].filter(Boolean).map((id) => api.delete(`/products/${id}`)),
+  )
 })
 
 describe('Orders', () => {
@@ -58,7 +76,6 @@ describe('Orders', () => {
       expect(first.status).toBe(201)
       const second = await api.post('/orders', payload)
       expect(second.status).toBe(201)
-      // Idempotency: same order ID returned both times
       expect(second.data.id).toBe(first.data.id)
     })
 
@@ -101,6 +118,8 @@ describe('Orders', () => {
     it('returns 200 with empty array for user with no orders', async () => {
       const { token: t } = await registerAndLogin()
       const newUserId = decodeUserId(t)
+      extraUserIds.push(newUserId)
+
       const res = await api.get(`/orders/user/${newUserId}`)
       expect(res.status).toBe(200)
       expect(res.data).toEqual([])
@@ -164,6 +183,8 @@ describe('Orders', () => {
 
     it('returns 403 for a different user', async () => {
       const { token: otherToken } = await registerAndLogin()
+      extraUserIds.push(decodeUserId(otherToken))
+
       const res = await authed(otherToken).get(`/orders/${orderId}`)
       expect(res.status).toBe(403)
     })

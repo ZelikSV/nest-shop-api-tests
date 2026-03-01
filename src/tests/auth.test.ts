@@ -1,6 +1,19 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterAll } from 'vitest'
 import { api, authed } from '../helpers/client'
-import { uniqueEmail, register, login } from '../helpers/auth'
+import { uniqueEmail, register, login, adminLogin, decodeUserId } from '../helpers/auth'
+
+const createdUserIds: string[] = []
+
+function trackUser(token: string) {
+  createdUserIds.push(decodeUserId(token))
+}
+
+afterAll(async () => {
+  const adminToken = await adminLogin()
+  if (!adminToken) return
+  const client = authed(adminToken)
+  await Promise.all(createdUserIds.map((id) => client.delete(`/users/${id}`)))
+})
 
 describe('Auth', () => {
   describe('POST /auth/register', () => {
@@ -10,6 +23,7 @@ describe('Auth', () => {
       expect(res.status).toBe(201)
       expect(res.data).toHaveProperty('accessToken')
       expect(typeof res.data.accessToken).toBe('string')
+      trackUser(res.data.accessToken)
     })
 
     it('returns 400 when required fields are missing', async () => {
@@ -29,7 +43,10 @@ describe('Auth', () => {
 
     it('returns 409 when email already registered', async () => {
       const email = uniqueEmail()
-      await register({ email })
+      const first = await register({ email })
+      expect(first.status).toBe(201)
+      trackUser(first.data.accessToken)
+
       const res = await register({ email })
       expect(res.status).toBe(409)
     })
@@ -38,7 +55,10 @@ describe('Auth', () => {
   describe('POST /auth/login', () => {
     it('returns 201 with accessToken on valid credentials', async () => {
       const email = uniqueEmail()
-      await register({ email })
+      const reg = await register({ email })
+      expect(reg.status).toBe(201)
+      trackUser(reg.data.accessToken)
+
       const res = await login(email)
       expect(res.status).toBe(201)
       expect(res.data).toHaveProperty('accessToken')
@@ -47,7 +67,10 @@ describe('Auth', () => {
 
     it('returns 401 on wrong password', async () => {
       const email = uniqueEmail()
-      await register({ email })
+      const reg = await register({ email })
+      expect(reg.status).toBe(201)
+      trackUser(reg.data.accessToken)
+
       const res = await login(email, 'wrongpassword')
       expect(res.status).toBe(401)
     })
@@ -62,7 +85,9 @@ describe('Auth', () => {
     it('returns 200 with user data for valid token', async () => {
       const email = uniqueEmail()
       const registerRes = await register({ email })
+      expect(registerRes.status).toBe(201)
       const token = registerRes.data.accessToken as string
+      trackUser(token)
 
       const res = await authed(token).get('/auth/profile')
       expect(res.status).toBe(200)
